@@ -1,6 +1,6 @@
 # OBL Compat Proxy
 
-一个从零开始的 Go 反向代理，对外兼容：
+一个 Go 实现的OB1反向代理，对外兼容：
 
 - `POST /v1/chat/completions`
 - `POST /v1/messages`
