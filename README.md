@@ -28,33 +28,67 @@
 
 ## 启动
 
-```bash
-cd /root/obl-compat-proxy
-export PROXY_API_KEY=change-me
-go run ./cmd/proxy
-```
+要求：
 
-如果你想用环境文件：
+- Go 1.22 或更高版本
+- 一组可用的 OBL 凭据
+
+最简单的启动方式是用 `.env`：
+
+1. 复制环境变量模板
+2. 填入你自己的密钥
+3. 启动代理
 
 ```bash
 cd /root/obl-compat-proxy
 cp .env.example .env
-# 只需要改:
+# 编辑 .env，至少填写:
 #   PROXY_API_KEY
 #   OBL_REFRESH_TOKEN
 #   OBL_ORGANIZATION_ID
-# 如果你已经有 access token，也可以顺手填 OBL_ACCESS_TOKEN
+# 如果你已经有 access token，也可以填写 OBL_ACCESS_TOKEN
 set -a
 source .env
 set +a
 go run ./cmd/proxy
 ```
 
-默认监听：
+也可以不使用 `.env`，直接导出环境变量启动：
+
+```bash
+cd /root/obl-compat-proxy
+export PROXY_API_KEY=change-me
+export OBL_REFRESH_TOKEN=fill-me
+export OBL_ORGANIZATION_ID=org_fill_me
+go run ./cmd/proxy
+```
+
+默认建议监听：
 
 ```text
-:8080
+0.0.0.0:18080
 ```
+
+如果你只想在本机访问，可以改成：
+
+```bash
+export LISTEN_ADDR=127.0.0.1:18080
+```
+
+启动后先做健康检查：
+
+```bash
+curl http://127.0.0.1:18080/healthz
+```
+
+再验证模型列表：
+
+```bash
+curl -H 'Authorization: Bearer change-me' \
+  http://127.0.0.1:18080/v1/models
+```
+
+如果你对外开放公网访问，还需要额外放行服务器的入站端口，例如 `18080/tcp`。
 
 ## 配置
 
