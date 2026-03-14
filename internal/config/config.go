@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -83,7 +84,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	registry, err := modelmap.LoadRegistry(os.Getenv("MODEL_MAP_JSON"))
+	modelMapJSON := os.Getenv("MODEL_MAP_JSON")
+	var discoveredModels []string
+	if strings.TrimSpace(modelMapJSON) == "" && cfg.OBLAccessToken != "" && cfg.OBLOrganizationID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		discoveredModels, _ = modelmap.DiscoverCatalog(ctx, modelmap.DiscoverOptions{
+			BaseURL:        cfg.OBLAPIBaseURL,
+			AccessToken:    cfg.OBLAccessToken,
+			OrganizationID: cfg.OBLOrganizationID,
+		})
+	}
+
+	registry, err := modelmap.LoadRegistryWithDiscovered(modelMapJSON, discoveredModels)
 	if err != nil {
 		return Config{}, fmt.Errorf("load model registry: %w", err)
 	}

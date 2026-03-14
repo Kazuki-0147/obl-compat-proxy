@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -98,17 +100,48 @@ func (s *TokenSource) reloadFromFileLocked() error {
 	if err := json.Unmarshal(body, &creds); err != nil {
 		return err
 	}
-	if strings.TrimSpace(creds.OAuth.AccessToken) != "" {
-		s.accessToken = strings.TrimSpace(creds.OAuth.AccessToken)
-	}
-	if strings.TrimSpace(creds.OAuth.RefreshToken) != "" {
-		s.refreshToken = strings.TrimSpace(creds.OAuth.RefreshToken)
-	}
-	if strings.TrimSpace(creds.OAuth.OrganizationID) != "" {
-		s.organizationID = strings.TrimSpace(creds.OAuth.OrganizationID)
-	}
+
+	fileAccessToken := strings.TrimSpace(creds.OAuth.AccessToken)
+	fileRefreshToken := strings.TrimSpace(creds.OAuth.RefreshToken)
+	fileOrganizationID := strings.TrimSpace(creds.OAuth.OrganizationID)
+
+	var fileExpiry time.Time
 	if creds.OAuth.ExpiresAt > 0 {
-		s.expiry = time.UnixMilli(creds.OAuth.ExpiresAt)
+		fileExpiry = time.UnixMilli(creds.OAuth.ExpiresAt)
+	}
+
+	// Only replace in-memory credentials when the file is newer, or when the
+	// process is missing a value entirely. This avoids reloading a stale refresh
+	// token from disk after a successful token rotation in-memory.
+	useFileCredentials := s.accessToken == "" || (!fileExpiry.IsZero() && (s.expiry.IsZero() || fileExpiry.After(s.expiry)))
+
+	if useFileCredentials {
+		if fileAccessToken != "" {
+			s.accessToken = fileAccessToken
+		}
+		if fileRefreshToken != "" {
+			s.refreshToken = fileRefreshToken
+		}
+		if fileOrganizationID != "" {
+			s.organizationID = fileOrganizationID
+		}
+		if !fileExpiry.IsZero() {
+			s.expiry = fileExpiry
+		}
+		return nil
+	}
+
+	if s.refreshToken == "" && fileRefreshToken != "" {
+		s.refreshToken = fileRefreshToken
+	}
+	if s.organizationID == "" && fileOrganizationID != "" {
+		s.organizationID = fileOrganizationID
+	}
+	if s.accessToken == "" && fileAccessToken != "" {
+		s.accessToken = fileAccessToken
+	}
+	if s.expiry.IsZero() && !fileExpiry.IsZero() {
+		s.expiry = fileExpiry
 	}
 	return nil
 }
@@ -141,7 +174,12 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("refresh access token: unexpected status %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			return fmt.Errorf("refresh access token: unexpected status %d", resp.StatusCode)
+		}
+		return fmt.Errorf("refresh access token: unexpected status %d: %s", resp.StatusCode, msg)
 	}
 
 	var payload refreshResponse
@@ -159,6 +197,56 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	if payload.ExpiresIn > 0 {
 		s.expiry = time.Now().Add(time.Duration(payload.ExpiresIn) * time.Second)
 	}
+	if err := s.persistCredentialsLocked(); err != nil {
+		return fmt.Errorf("persist refreshed credentials: %w", err)
+	}
 
 	return nil
+}
+
+func (s *TokenSource) persistCredentialsLocked() error {
+	if s.credentialsFile == "" {
+		return nil
+	}
+
+	dir := filepath.Dir(s.credentialsFile)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+	}
+
+	doc := map[string]any{}
+	if body, err := os.ReadFile(s.credentialsFile); err == nil && len(body) > 0 {
+		if err := json.Unmarshal(body, &doc); err != nil {
+			return err
+		}
+	}
+
+	oauth, _ := doc["oauth"].(map[string]any)
+	if oauth == nil {
+		oauth = map[string]any{}
+	}
+	oauth["access_token"] = s.accessToken
+	if s.refreshToken != "" {
+		oauth["refresh_token"] = s.refreshToken
+	}
+	if s.organizationID != "" {
+		oauth["organization_id"] = s.organizationID
+	}
+	if !s.expiry.IsZero() {
+		oauth["expires_at"] = s.expiry.UnixMilli()
+	}
+	doc["oauth"] = oauth
+
+	body, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := s.credentialsFile + ".tmp"
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.credentialsFile)
 }

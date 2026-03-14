@@ -106,7 +106,19 @@ func ParseAnthropicRequest(body []byte, registry *modelmap.Registry, imageMaxByt
 }
 
 func BuildAnthropicResponse(aggregate obl.Aggregate, requestedModel string) map[string]any {
-	content := make([]map[string]any, 0, 1)
+	content := make([]map[string]any, 0, 2)
+	if aggregate.Reasoning.String() != "" && aggregate.ReasoningSignature != "" {
+		content = append(content, map[string]any{
+			"type":      "thinking",
+			"thinking":  aggregate.Reasoning.String(),
+			"signature": aggregate.ReasoningSignature,
+		})
+	} else if aggregate.RedactedThinking != "" {
+		content = append(content, map[string]any{
+			"type": "redacted_thinking",
+			"data": aggregate.RedactedThinking,
+		})
+	}
 	if text := aggregate.Content.String(); text != "" {
 		content = append(content, map[string]any{
 			"type": "text",
@@ -192,11 +204,23 @@ func parseAnthropicMessage(message AnthropicMessage, imageMaxBytes int) ([]norma
 				Text:         block.text,
 				CacheControl: block.cacheControl,
 			})
-		case "thinking", "redacted_thinking":
+		case "thinking":
 			if role != normalize.RoleAssistant {
 				return nil, fmt.Errorf("Anthropic %s content cannot contain %q blocks", message.Role, block.blockType)
 			}
-			continue
+			current.Content = append(current.Content, normalize.ContentPart{
+				Type:      normalize.ContentPartThinking,
+				Text:      block.text,
+				Signature: block.signature,
+			})
+		case "redacted_thinking":
+			if role != normalize.RoleAssistant {
+				return nil, fmt.Errorf("Anthropic %s content cannot contain %q blocks", message.Role, block.blockType)
+			}
+			current.Content = append(current.Content, normalize.ContentPart{
+				Type: normalize.ContentPartRedactedThinking,
+				Data: block.data,
+			})
 		case "image":
 			imageURL, mediaType, err := parseAnthropicImage(block, imageMaxBytes)
 			if err != nil {

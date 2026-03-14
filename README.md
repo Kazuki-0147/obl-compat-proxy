@@ -9,7 +9,9 @@
 
 - `POST /api/v1/chat/completions`
 
-当前只暴露 6 个模型：
+默认会在启动时从 OBL 的 `/api/v1/models` 动态拉取模型目录，因此 `/v1/models` 通常会返回平台当前可见的全量模型列表。
+
+另外，这几个模型保留了仓库内置的特殊配置：
 
 - `anthropic/claude-opus-4.6`
 - `anthropic/claude-sonnet-4.6`
@@ -114,6 +116,14 @@ curl -H 'Authorization: Bearer change-me' \
 ```text
 https://dashboard.openblocklabs.com/api/v1
 ```
+
+如果未设置 `MODEL_MAP_JSON`，代理会尝试使用当前 OBL 凭据请求：
+
+```text
+GET /api/v1/models
+```
+
+并把返回的模型目录加入本地注册表。动态发现失败时，才会退回到仓库内置的默认模型集。
 
 当前 `.env.example` 已经预填了这两个固定值：
 

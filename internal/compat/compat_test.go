@@ -153,17 +153,47 @@ func TestParseAnthropicRequestAcceptsAssistantThinkingBlocks(t *testing.T) {
 	if req.Messages[0].Role != normalize.RoleAssistant {
 		t.Fatalf("first role = %q, want assistant", req.Messages[0].Role)
 	}
-	if got := len(req.Messages[0].Content); got != 1 {
-		t.Fatalf("assistant content len = %d, want 1", got)
+	if got := len(req.Messages[0].Content); got != 2 {
+		t.Fatalf("assistant content len = %d, want 2", got)
 	}
-	if req.Messages[0].Content[0].Text != "First answer" {
-		t.Fatalf("assistant text = %q", req.Messages[0].Content[0].Text)
+	if req.Messages[0].Content[0].Type != normalize.ContentPartThinking {
+		t.Fatalf("assistant first content type = %q, want thinking", req.Messages[0].Content[0].Type)
+	}
+	if req.Messages[0].Content[0].Signature != "sig_123" {
+		t.Fatalf("assistant thinking signature = %q", req.Messages[0].Content[0].Signature)
+	}
+	if req.Messages[0].Content[1].Text != "First answer" {
+		t.Fatalf("assistant text = %q", req.Messages[0].Content[1].Text)
 	}
 	if got := len(req.Messages[0].ToolCalls); got != 1 {
 		t.Fatalf("assistant tool calls len = %d, want 1", got)
 	}
 	if req.Messages[0].ToolCalls[0].Name != "lookup" {
 		t.Fatalf("assistant tool call name = %q", req.Messages[0].ToolCalls[0].Name)
+	}
+}
+
+func TestBuildAnthropicResponseIncludesThinkingBlock(t *testing.T) {
+	aggregate := obl.Aggregate{
+		ID:                 "gen_1",
+		FinishReason:       "tool_calls",
+		ReasoningSignature: "sig_123",
+	}
+	aggregate.Reasoning.WriteString("need tool")
+
+	resp := BuildAnthropicResponse(aggregate, "anthropic/claude-opus-4.6")
+	content, ok := resp["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("content type = %T", resp["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("content len = %d, want 1", len(content))
+	}
+	if content[0]["type"] != "thinking" {
+		t.Fatalf("first block type = %v", content[0]["type"])
+	}
+	if content[0]["signature"] != "sig_123" {
+		t.Fatalf("signature = %v", content[0]["signature"])
 	}
 }
 
@@ -191,6 +221,7 @@ func TestBuildRequestMapsThinkingFields(t *testing.T) {
 			Effort:       normalize.ThinkingEffortHigh,
 			BudgetTokens: 8192,
 		},
+		AnthropicBetas: []string{"interleaved-thinking-2025-05-14"},
 	}
 
 	upstream := obl.BuildRequest(req, true)
@@ -208,6 +239,44 @@ func TestBuildRequestMapsThinkingFields(t *testing.T) {
 	}
 	if upstream.Messages[0].Content[0].CacheControl == nil || upstream.Messages[0].Content[0].CacheControl.TTL != "1h" {
 		t.Fatalf("cache_control not forwarded: %+v", upstream.Messages[0].Content[0].CacheControl)
+	}
+	if got := len(upstream.AnthropicBetas); got != 1 || upstream.AnthropicBetas[0] != "interleaved-thinking-2025-05-14" {
+		t.Fatalf("AnthropicBetas = %+v", upstream.AnthropicBetas)
+	}
+}
+
+func TestBuildRequestPreservesAnthropicThinkingParts(t *testing.T) {
+	upstream := obl.BuildRequest(normalize.Request{
+		Model: modelmap.ModelSpec{
+			ID:            "anthropic/claude-opus-4.6",
+			Family:        "anthropic",
+			UpstreamModel: "anthropic/claude-opus-4.6",
+		},
+		Messages: []normalize.Message{{
+			Role: normalize.RoleAssistant,
+			Content: []normalize.ContentPart{
+				{Type: normalize.ContentPartThinking, Text: "internal chain", Signature: "sig_123"},
+				{Type: normalize.ContentPartText, Text: "Let me use a tool."},
+			},
+			ToolCalls: []normalize.ToolCall{{
+				ID:        "toolu_1",
+				Name:      "lookup",
+				Arguments: `{"q":"a"}`,
+			}},
+		}},
+	}, true)
+
+	if got := len(upstream.Messages); got != 1 {
+		t.Fatalf("Messages len = %d", got)
+	}
+	if got := len(upstream.Messages[0].Content); got != 2 {
+		t.Fatalf("content len = %d", got)
+	}
+	if upstream.Messages[0].Content[0].Type != "thinking" {
+		t.Fatalf("first content type = %q", upstream.Messages[0].Content[0].Type)
+	}
+	if upstream.Messages[0].Content[0].Signature != "sig_123" {
+		t.Fatalf("signature = %q", upstream.Messages[0].Content[0].Signature)
 	}
 }
 

@@ -35,6 +35,7 @@ type Request struct {
 	ReasoningEffort  string           `json:"reasoning_effort,omitempty"`
 	ReasoningEnabled *bool            `json:"reasoning_enabled,omitempty"`
 	ReasoningBudget  int              `json:"reasoning_budget,omitempty"`
+	AnthropicBetas   []string         `json:"-"`
 }
 
 type RequestMessage struct {
@@ -48,6 +49,9 @@ type RequestMessage struct {
 type RequestPart struct {
 	Type         string               `json:"type"`
 	Text         string               `json:"text,omitempty"`
+	Thinking     string               `json:"thinking,omitempty"`
+	Signature    string               `json:"signature,omitempty"`
+	Data         string               `json:"data,omitempty"`
 	ImageURL     *RequestImageURL     `json:"image_url,omitempty"`
 	CacheControl *RequestCacheControl `json:"cache_control,omitempty"`
 }
@@ -136,6 +140,9 @@ func (c *Client) StreamChat(ctx context.Context, request Request) (*http.Respons
 		req.Header.Set("Authorization", authHeader)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
+		if len(request.AnthropicBetas) > 0 {
+			req.Header.Set("anthropic-beta", strings.Join(request.AnthropicBetas, ","))
+		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -158,17 +165,18 @@ func (c *Client) StreamChat(ctx context.Context, request Request) (*http.Respons
 func BuildRequest(req normalize.Request, includeUsage bool) Request {
 	messages := applyDefaultPromptCaching(req)
 	upstream := Request{
-		Model:         req.Model.UpstreamModel,
-		Models:        req.Model.CandidateList(),
-		Messages:      buildMessages(messages),
-		Temperature:   req.Temperature,
-		TopP:          req.TopP,
-		MaxTokens:     req.MaxTokens,
-		Tools:         buildTools(req.Tools),
-		ToolChoice:    buildToolChoice(req.ToolChoice),
-		Stream:        true,
-		StreamOptions: &StreamOptions{IncludeUsage: includeUsage},
-		User:          req.User,
+		Model:          req.Model.UpstreamModel,
+		Models:         req.Model.CandidateList(),
+		Messages:       buildMessages(messages),
+		Temperature:    req.Temperature,
+		TopP:           req.TopP,
+		MaxTokens:      req.MaxTokens,
+		Tools:          buildTools(req.Tools),
+		ToolChoice:     buildToolChoice(req.ToolChoice),
+		Stream:         true,
+		StreamOptions:  &StreamOptions{IncludeUsage: includeUsage},
+		User:           req.User,
+		AnthropicBetas: append([]string(nil), req.AnthropicBetas...),
 	}
 
 	switch req.Thinking.Mode {
@@ -238,6 +246,17 @@ func buildParts(parts []normalize.ContentPart) []RequestPart {
 					Detail: "auto",
 				},
 				CacheControl: buildCacheControl(part.CacheControl),
+			})
+		case normalize.ContentPartThinking:
+			out = append(out, RequestPart{
+				Type:      "thinking",
+				Thinking:  part.Text,
+				Signature: part.Signature,
+			})
+		case normalize.ContentPartRedactedThinking:
+			out = append(out, RequestPart{
+				Type: "redacted_thinking",
+				Data: part.Data,
 			})
 		}
 	}

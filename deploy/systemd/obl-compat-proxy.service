@@ -1,0 +1,15 @@
+[Unit]
+Description=OBL Compat Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/obl-compat-proxy
+EnvironmentFile=/root/obl-compat-proxy/.env
+ExecStart=/root/obl-compat-proxy/dist/obl-compat-proxy-linux-amd64
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

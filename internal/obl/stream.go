@@ -80,14 +80,17 @@ func (u *ChunkUsage) UnmarshalJSON(data []byte) error {
 }
 
 type Aggregate struct {
-	ID           string
-	Created      int64
-	Model        string
-	Role         string
-	Content      strings.Builder
-	ToolCalls    map[int]*normalize.ToolCall
-	FinishReason string
-	Usage        normalize.Usage
+	ID                 string
+	Created            int64
+	Model              string
+	Role               string
+	Content            strings.Builder
+	Reasoning          strings.Builder
+	ReasoningSignature string
+	RedactedThinking   string
+	ToolCalls          map[int]*normalize.ToolCall
+	FinishReason       string
+	Usage              normalize.Usage
 }
 
 func (a *Aggregate) Consume(chunk Chunk) {
@@ -110,6 +113,16 @@ func (a *Aggregate) Consume(chunk Chunk) {
 		}
 		if choice.Delta.Content != "" {
 			a.Content.WriteString(choice.Delta.Content)
+		}
+		reasoningText, reasoningSignature, redactedThinking := extractReasoningDelta(choice.Delta)
+		if reasoningText != "" {
+			a.Reasoning.WriteString(reasoningText)
+		}
+		if reasoningSignature != "" {
+			a.ReasoningSignature = reasoningSignature
+		}
+		if redactedThinking != "" {
+			a.RedactedThinking = redactedThinking
 		}
 		for _, part := range choice.Delta.ToolCalls {
 			call := a.ToolCalls[part.Index]
@@ -140,6 +153,37 @@ func (a *Aggregate) Consume(chunk Chunk) {
 			Extra:            chunk.Usage.Extra,
 		}
 	}
+}
+
+func extractReasoningDelta(delta ChunkDelta) (string, string, string) {
+	var text string
+	if delta.Reasoning != nil {
+		text = *delta.Reasoning
+	}
+
+	var signature string
+	var redacted string
+	for _, detail := range delta.ReasoningDetails {
+		switch detail.Type {
+		case "reasoning.text":
+			if text == "" && detail.Text != "" {
+				text = detail.Text
+			}
+			if detail.Signature != "" {
+				signature = detail.Signature
+			}
+		case "reasoning.summary":
+			if text == "" && detail.Summary != "" {
+				text = detail.Summary
+			}
+		case "reasoning.encrypted", "reasoning.redacted":
+			if detail.Data != "" {
+				redacted = detail.Data
+			}
+		}
+	}
+
+	return text, signature, redacted
 }
 
 func (a *Aggregate) OrderedToolCalls() []normalize.ToolCall {

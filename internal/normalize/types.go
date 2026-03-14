@@ -22,8 +22,10 @@ const (
 type ContentPartType string
 
 const (
-	ContentPartText  ContentPartType = "text"
-	ContentPartImage ContentPartType = "image"
+	ContentPartText             ContentPartType = "text"
+	ContentPartImage            ContentPartType = "image"
+	ContentPartThinking         ContentPartType = "thinking"
+	ContentPartRedactedThinking ContentPartType = "redacted_thinking"
 )
 
 type ThinkingMode string
@@ -48,6 +50,8 @@ type ContentPart struct {
 	Text         string          `json:"text,omitempty"`
 	ImageURL     string          `json:"image_url,omitempty"`
 	MediaType    string          `json:"media_type,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
+	Data         string          `json:"data,omitempty"`
 	CacheControl *CacheControl   `json:"cache_control,omitempty"`
 }
 
@@ -89,18 +93,19 @@ type ThinkingConfig struct {
 }
 
 type Request struct {
-	Protocol     string
-	Model        modelmap.ModelSpec
-	Messages     []Message
-	Stream       bool
-	IncludeUsage bool
-	Temperature  *float64
-	TopP         *float64
-	MaxTokens    int
-	Tools        []ToolDefinition
-	ToolChoice   *ToolChoice
-	User         string
-	Thinking     ThinkingConfig
+	Protocol       string
+	Model          modelmap.ModelSpec
+	Messages       []Message
+	Stream         bool
+	IncludeUsage   bool
+	Temperature    *float64
+	TopP           *float64
+	MaxTokens      int
+	Tools          []ToolDefinition
+	ToolChoice     *ToolChoice
+	User           string
+	Thinking       ThinkingConfig
+	AnthropicBetas []string
 }
 
 type Usage struct {

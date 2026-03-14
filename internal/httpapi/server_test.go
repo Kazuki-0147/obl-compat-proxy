@@ -344,3 +344,36 @@ func TestAnthropicNonStreamUsageIncludesMappedDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestAnthropicRequestForwardsInterleavedThinkingBetaHeader(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("anthropic-beta"); got != "interleaved-thinking-2025-05-14" {
+			t.Fatalf("anthropic-beta = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"id\":\"chatcmpl_beta\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"anthropic/claude-opus-4.6\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	server, err := NewServer(mustServerConfig(t, upstream.URL))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(`{
+		"model":"anthropic/claude-opus-4.6",
+		"max_tokens":128,
+		"thinking":{"type":"enabled","budget_tokens":4096},
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+		"messages":[{"role":"user","content":"hi"}]
+	}`))
+	req.Header.Set("x-api-key", "test-key")
+	rec := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}

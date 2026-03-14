@@ -11,6 +11,7 @@ import (
 
 	"github.com/openblocklabs/obl-compat-proxy/internal/compat"
 	"github.com/openblocklabs/obl-compat-proxy/internal/config"
+	"github.com/openblocklabs/obl-compat-proxy/internal/normalize"
 	"github.com/openblocklabs/obl-compat-proxy/internal/obl"
 	"github.com/openblocklabs/obl-compat-proxy/internal/sse"
 )
@@ -126,6 +127,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	req.AnthropicBetas = anthropicBetasForRequest(r, req)
 
 	upstreamResp, err := s.client.StreamChat(r.Context(), obl.BuildRequest(req, true))
 	if err != nil {
@@ -147,6 +149,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, compat.BuildAnthropicResponse(aggregate, req.Model.ID))
+}
+
+func anthropicBetasForRequest(r *http.Request, req normalize.Request) []string {
+	betas := splitHeaderValues(r.Header.Values("anthropic-beta"))
+	if req.Thinking.Enabled && len(req.Tools) > 0 && !containsString(betas, "interleaved-thinking-2025-05-14") {
+		betas = append(betas, "interleaved-thinking-2025-05-14")
+	}
+	return betas
 }
 
 func (s *Server) readBody(w http.ResponseWriter, r *http.Request, anthropic bool) ([]byte, bool) {
@@ -545,6 +555,32 @@ func defaultString(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func splitHeaderValues(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			item = strings.TrimSpace(item)
+			if item == "" || containsString(out, item) {
+				continue
+			}
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeAnthropicEvent(w http.ResponseWriter, eventType string, payload string) error {
